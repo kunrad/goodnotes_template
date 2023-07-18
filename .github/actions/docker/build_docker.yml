@@ -1,0 +1,58 @@
+name: 'Build and publish Docker Images to GitHub Container registry'
+description: 'Build and Publish custom Dockerfile.'
+inputs:
+  github-token:
+    description: 'GitHub token to push Docker image to GitHub Packages'
+    required: true
+  image-name:
+    description: 'Docker Image name'
+    required: true
+  image-tag:
+    description: 'Docker Image tag'
+    default: "latest"
+    required: false
+  extract-git-tag:
+    description: 'Extract git-tag from repository'
+    default: "false"
+    required: false
+  dockerfile:
+    description: 'Dockerfile name'
+    default: "Dockerfile"
+    required: false
+  build-context:
+    description: 'Path to build context'
+    default: "."
+    required: false
+  pull-image:
+    description: 'Pull the image before buiding it'
+    default: "false"
+    required: false
+  additional-image-tags:
+    description: 'Multiple tags that will be attached to a built image'
+    default: ""
+    required: false
+  image-platform:
+    description: 'Target image platform/platforms'
+    default: ""
+    required: false
+  custom-args:
+    description: 'Any additional docker build arguments as a string'
+    default: ""
+    required: false
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.github-token }}
+    - ${{ inputs.image-name }}
+    - ${{ inputs.image-tag }}
+    - ${{ inputs.extract-git-tag }}
+    - ${{ inputs.dockerfile }}
+    - ${{ inputs.build-context}}
+    - ${{ inputs.pull-image}}
+    - ${{ inputs.additional-image-tags}}
+    - ${{ inputs.image-platform}}
+    - ${{ inputs.custom-args}}
+branding:
+  icon: 'box'
+  color: 'green'
