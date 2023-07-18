@@ -1,0 +1,124 @@
+name: "Terraform Deployment"
+
+on:
+  workflow_call:
+    inputs:
+    # working directory to specify terraform code location
+      working-directory:
+        description: 'Working directory to specify terraform code location'
+        required: false
+        type: string
+        default: './terraform'
+      apply-branch:
+        description: 'Branch to apply terraform code'
+        required: false
+        type: string
+        default: 'main'
+
+  defaults:
+    run:
+      shell: bash
+
+  jobs:
+    terraform:
+      name: Deploy Terraform
+      runs-on: ubuntu-latest
+
+      defaults:
+        run:
+           working-directory: ${{ inputs.working-directory }}
+
+           # specify the environment variables so workflow knows where to deploy artifact
+           # default env is set to dev
+      environment: ${{ github.event.inputs.environment || 'dev' }}
+
+      env:
+        DEPLOY_REPO: ${{ github.event.repository.name }}
+        DEPLOY_ENV: ${{ github.event.input.environment || 'dev' }}
+
+      steps:
+        - name: Harden Runner
+          uses: step-security/harden-runner@128a63446a954579617e875aaab7d2978154e969
+          with:
+            egress-policy: audit
+
+        - name: Checkout Code
+          uses: actions/checkout@v2
+#          with:
+#            ref: ${{ github.event.inputs.apply-branch }}
+#            fetch-depth: 0
+
+        - name: Setup Tflint
+          uses: terraform-linters/setup-tflint@ba6bb2989f94daf58a4cc6eac2c1ca7398a678bf  # v3.0.0
+          with:
+            tflint_version: latest
+
+        - name: Init TFlint
+          run: tflint --init
+
+        - name: Run Tflint
+          run: tflint -f compact
+
+        - name: Run Checkov action
+          uses: bridgecrewio/checkov-action@8285a93b8ec14e277a8fe7e1b3faf7c59c77775f
+          with:
+          directory: ${{ inputs.working-directory }}
+          quiet: true # optional: display only failed checks
+          soft_fail: true # optional: do not return an error code if there are failed checks
+          framework: terraform # optional: run only on a specific infrastructure {cloudformation,terraform,kubernetes,all}
+          output_format: sarif # optional: the output format, one of: cli, json, junitxml, github_failed_only, or sarif. Default: sarif
+          output_file_path: reports/results.sarif # folder and name of results file
+          download_external_modules: true # optional: Allow download external terraform modules from public git repositories and terraform registry
+          log_level: DEBUG # optional: set log level. Default WARNING
+          args: --directory ${{ github.event.inputs.working-directory }}
+
+        - name: Setup Terraform
+          uses: hashicorp/setup-terraform@v1
+
+        - name: Print debug info
+          run: |
+            echo github actor: ${{ github.actor }}
+            echo environment is: ${{ github.event.inputs.environment }}
+            echo branch or tag name: ${{ github.ref_name }}
+
+        - name: Format Terraform
+          run: |
+            terraform fmt -recursive -check -diff -no-color -input=false
+
+        - name: Terraform Init
+          id: init
+          run: |
+            terraform init -backend-config='./.env/${{ github.event.inputs.environment || 'dev}}/backend.tfvars' -upgrade=true -no-color -input=false
+
+        - name: Terraform Validate
+          id: validate
+          run: |
+            terraform validate -var-file='./.env/${{ github.event.inputs.environment || 'dev}}/terraform.tfvars' -no-color -input=false
+
+        - name: Terraform Plan
+           id: plan
+            run: |
+              export "TF_VAR_deploy_repo=${{ env.DEPLOY_REPO }}
+              export "TF_VAR_deploy_env=${{ env.DEPLOY_ENV }}
+              terraform plan -var-file='./.env/${{ github.event.inputs.environment || 'dev}}/terraform.tfvars' -no-color -input=false -out=tfplan
+              terraform show -json tfplan > tfplan.json
+
+        - name: Terraform Apply
+          if: github.event.inputs.apply-branch == github.ref_name || github.ref_name != 'refs/heads/destroy'
+          id: apply
+          run: |
+            terraform apply -no-color -input=false tfplan
+
+        - name: Terraform Destroy
+          if: github.ref == 'refs/heads/destroy'
+          id: destroy
+          run: |
+            terraform destroy -auto-approve -input=false -var-file=.env/${{ github.event.inputs.environment || 'dev' }}/terraform.tfvars
+
+        - name: Terraform Output
+          id: output-step
+          run: |
+            outputs=$(terraform output output)
+            echo "outputs" >> $GITHUB_ENV
+      outputs:
+        infa-outputs: ${{ steps.output-step.outputs.infra-outputs }}
